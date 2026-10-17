@@ -17,6 +17,7 @@
   "files": [
     "dist",
     "!dist/**/*.map",
+    "npm-shrinkwrap.json",
     "README.md",
     "LICENSE"
   ],
@@ -24,7 +25,7 @@
     "build": "tsc",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
-    "test:ci": "npm run typecheck && npm run build && node test/regressions.mjs && node test/integration.mjs && node --test test/security.mjs test/model-security.mjs test/statusline-security.mjs test/cancellation.mjs test/lifecycle.mjs && node test/launch.mjs node dist/index.js",
+    "test:ci": "npm run typecheck && npm run build && node test/package.mjs && node test/regressions.mjs && node test/integration.mjs && node --test test/security.mjs test/model-security.mjs test/statusline-security.mjs test/cancellation.mjs test/lifecycle.mjs && node test/launch.mjs node dist/index.js",
     "test": "for t in guard perm id scope init nopi smoke trace model; do echo \"== $t\"; node test/$t.mjs || exit 1; done",
     "prepublishOnly": "npm run test:ci"
   },

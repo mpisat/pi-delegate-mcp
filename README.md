@@ -119,12 +119,17 @@ git clone https://github.com/mpisat/pi-delegate-mcp.git
 cd pi-delegate-mcp
 npm ci --ignore-scripts
 npm run test:ci
-npm install -g --ignore-scripts .
+npm pack --ignore-scripts
+npm install -g --ignore-scripts ./pi-delegate-mcp-0.1.1.tgz
+npm ci --omit=dev --ignore-scripts --prefix "$(npm root -g)/pi-delegate-mcp"
 ```
 
 The offline security tests need `rg` and `fd` (or `fdfind`) on PATH. They also discover cached tools
 under the normal Pi agent `bin` directory; `PI_TEST_TOOLS_DIR` overrides that test-only location.
 No provider credentials or paid requests are needed for `test:ci`.
+The package includes `npm-shrinkwrap.json`. The final `npm ci` applies those reviewed dependency
+versions inside the installed CLI; npm's local archive installation can otherwise resolve newer
+transitive versions even when the archive contains a shrinkwrap.
 
 The published upstream npm package does not contain these fork fixes. Installing this fork does
 not connect it to Claude Code. Register the reviewed installed executable as a local stdio MCP server

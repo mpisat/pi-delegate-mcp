@@ -16,7 +16,7 @@ Evidence: the source README says tools are read-only by default, enabledModels i
 
 ### Task 1: Workspace, resources and dependency compatibility
 
-Files: package.json, package-lock.json, .github/workflows/release.yml, src/config.ts, src/permissions.ts, src/registry.ts, src/pi/worker.ts, src/tools/spawn.ts, src/tools/init.ts, src/tools/models.ts, new src/pi/workspace.ts, new src/pi/resources.ts if needed, test/integration.mjs, new test/security.mjs, new test/security-helpers.mjs, README.md.
+Files: package.json, npm-shrinkwrap.json, .github/workflows/release.yml, src/config.ts, src/permissions.ts, src/registry.ts, src/pi/worker.ts, src/tools/spawn.ts, src/tools/init.ts, src/tools/models.ts, new src/pi/workspace.ts, new src/pi/resources.ts if needed, test/integration.mjs, new test/security.mjs, new test/security-helpers.mjs, README.md.
 
 - [x] Extend the real stdio MCP/local fake-provider harness with allowed inside reads and denied parent, absolute, symlink-file, symlink-directory and cwd escapes. Assert the synthetic canary never reaches the provider, and denial has a specific workspace-policy reason. Include read, grep, find and ls paths. Keep SDK behavior behind the actual session/tool execution boundary.
 - [x] Add tests asserting project AGENTS.md/CLAUDE.md reaches prompts with extensions false, while project executable configuration and symlinked context outside the root do not load. Reject extensions true by default before any JavaScript runs, and positively test the separately enabled privileged extension path.
@@ -60,3 +60,5 @@ Commands: npm run test:ci; npm audit --json; git diff --check; node test/live.mj
 - Corrected live MCP acceptance: `/tmp/pi-fork-live-results.json`. Both `opencode-go/deepseek-v4.1-flash` and `commandcode/deepseek/deepseek-v4.1-flash` read the disposable fixture, recalled its value without that answer in the follow-up prompt or further tool calls, and rejected shell/outside-root requests.
 - Dependency advisory check: `/tmp/pi-fork-dependency-audit.json`, zero reported vulnerabilities. No configured provider credential values were found in repository files.
 - Final integration and remote containment evidence will be recorded in the delivery report after pushing. Claude Code remains disconnected.
+
+- Installed-package verification detected transitive dependency drift when npm omitted the repository lockfile from the archive. Converted the unchanged lock data to the publishable npm shrinkwrap format for the installed CLI. The archive allowlist and packaging test explicitly require the lock. Fresh npm 11 local archive installs still resolved newer transitive versions despite its inclusion, so the README applies the lock with npm ci inside the installed CLI after archive installation.

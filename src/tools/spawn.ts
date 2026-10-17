@@ -1,7 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ALLOW_ALL, BATCH_MAX, DEFAULT_MODEL, PROGRESS_MS } from "../config.js";
-import { PERMITTED, pickTools, READ_ONLY_TOOLS } from "../permissions.js";
+import { PERMITTED, checkExtensions, pickTools, READ_ONLY_TOOLS } from "../permissions.js";
+import { canonicalWorkspace } from "../pi/workspace.js";
 import { resolveModel } from "../pi/models.js";
 import { message } from "../pi/worker.js";
 import { claimId, evictHistory, launch } from "../registry.js";
@@ -53,8 +54,8 @@ export function registerSpawn(server: McpServer): void {
         "Use this for anything that might take more than a minute.",
       inputSchema: spawnShape,
     },
-    async (args) => {
-      const w = await launch(args);
+    async (args, extra) => {
+      const w = await launch(args, extra.signal);
       return json({ sessionId: w.id, label: w.label, state: w.state, model: w.model, activeTools: w.activeTools });
     },
   );
@@ -81,7 +82,7 @@ export function registerSpawn(server: McpServer): void {
           .describe('Names the tasks `<prefix>-01`, `<prefix>-02`, ... e.g. "audit" gives "audit-01"'),
       },
     },
-    async ({ tasks, model, cwd, tools, extensions, idPrefix }) => {
+    async ({ tasks, model, cwd, tools, extensions, idPrefix }, extra) => {
       const width = Math.max(String(tasks.length).length, 2);
       const merged = tasks.map((t, i) => ({
         prompt: t.prompt,
@@ -97,6 +98,7 @@ export function registerSpawn(server: McpServer): void {
       // half-started fan-out is the worst outcome: you pay for the delegates that launched
       // and still have to work out which ones did not.
       const seen = new Set<string>();
+      extra.signal.throwIfAborted();
       for (const [i, t] of merged.entries()) {
         if (t.id) {
           if (seen.has(t.id))
@@ -105,19 +107,22 @@ export function registerSpawn(server: McpServer): void {
           claimId(t.id);
         }
         try {
+          checkExtensions(t.extensions);
+          const workspace = canonicalWorkspace(t.cwd);
           pickTools(t.tools);
-          await resolveModel(t.model || DEFAULT_MODEL, t.cwd || process.cwd());
+          await resolveModel(t.model || DEFAULT_MODEL, workspace);
         } catch (e) {
           throw new Error(`tasks[${i}]${t.id ? ` (${t.id})` : ""}: ${message(e)}`);
         }
       }
 
+      extra.signal.throwIfAborted();
       const started: Array<{ index: number; sessionId: string; label?: string; state: string; model?: string }> = [];
       const failures: Array<{ index: number; id?: string; error: string }> = [];
       await Promise.all(
         merged.map(async (t, index) => {
           try {
-            const w = await launch(t);
+            const w = await launch(t, extra.signal);
             started.push({ index, sessionId: w.id, label: w.label, state: w.state, model: w.model });
           } catch (e) {
             failures.push({ index, id: t.id, error: message(e) });
@@ -149,7 +154,10 @@ export function registerSpawn(server: McpServer): void {
       inputSchema: spawnShape,
     },
     async (args, extra) => {
-      const w = await launch(args);
+      const w = await launch(args, extra.signal);
+      const cancel = () => { void w.abort(); };
+      extra.signal.addEventListener("abort", cancel, { once: true });
+      if (extra.signal.aborted) cancel();
       // Progress notifications reset the MCP request timeout, which defaults to 60s.
       const token = extra?._meta?.progressToken;
       const ticker = token
@@ -166,6 +174,7 @@ export function registerSpawn(server: McpServer): void {
         await w.run;
       } finally {
         if (ticker) clearInterval(ticker);
+        extra.signal.removeEventListener("abort", cancel);
       }
       const snap = w.snapshot();
       evictHistory();

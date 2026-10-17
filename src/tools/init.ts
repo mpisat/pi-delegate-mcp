@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { ALLOW_ALL, DEFAULT_MODEL, HISTORY_LIMIT, LIST_CAP, TRACE_ARGS, TRACE_RESULT } from "../config.js";
+import { ALLOW_ALL, ALLOW_EXTENSIONS, WORKSPACE_ROOT, DEFAULT_MODEL, HISTORY_LIMIT, LIST_CAP, TRACE_ARGS, TRACE_RESULT } from "../config.js";
 import { PERMITTED, READ_ONLY_TOOLS } from "../permissions.js";
 import { modelScope, preflight, scopedModels } from "../pi/models.js";
 import { json, markInitialised } from "./shared.js";
@@ -49,11 +49,13 @@ export function registerInit(server: McpServer): void {
           "on its own budget, then returns a result. Its context never enters yours.",
 
         permissions: {
+          workspaceRoot: WORKSPACE_ROOT,
+          extensionsAllowedHere: ALLOW_EXTENSIONS,
           toolsAllowedHere: ALLOW_ALL ? "any (PI_DELEGATE_ALLOW_WRITE=1)" : [...PERMITTED],
           defaultIfYouOmitTools: [...READ_ONLY_TOOLS],
           warning:
-            "This is not a sandbox. pi has no permission system, so a delegate holding `bash` can " +
-            "write and delete files whatever its tool list says. Your prompt is the only other guardrail.",
+            "Default file tools are confined to workspaceRoot. This is not an OS sandbox: shell tools " +
+            "and administrator-enabled extensions run with the server account privileges.",
         },
 
         models: {
@@ -106,8 +108,8 @@ export function registerInit(server: McpServer): void {
           "Slow models plus many turns means minutes, not seconds. Prefer `spawn` over `run`.",
           "The delegate cannot see your conversation. Put every fact it needs into `prompt`.",
           "It reads AGENTS.md and CLAUDE.md from `cwd`, so point `cwd` at the right repository.",
-          "pi extensions are off by default because they add startup cost and can misbehave. " +
-            "Pass `extensions: true` only if the delegate needs them.",
+          "Extensions require PI_DELEGATE_ALLOW_EXTENSIONS=1 on the server and extensions: true on " +
+            "the request. Enabling them trusts executable code with full server privileges.",
         ],
 
         limits: {

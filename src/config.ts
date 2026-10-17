@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -22,6 +23,10 @@ const num = (value: string | undefined, fallback: number): number => {
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? n : fallback;
 };
+
+/** Fixed by the server, never by a delegate request. */
+export const WORKSPACE_ROOT = realpathSync(process.env.PI_DELEGATE_ROOT || process.cwd());
+export const ALLOW_EXTENSIONS = process.env.PI_DELEGATE_ALLOW_EXTENSIONS === "1";
 
 /** Where pi keeps auth.json, settings.json and extensions. */
 export const AGENT_DIR = process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");

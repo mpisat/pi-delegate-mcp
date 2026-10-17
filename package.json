@@ -24,7 +24,7 @@
     "build": "tsc",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
-    "test:ci": "npm run typecheck && npm run build && node test/regressions.mjs && node test/integration.mjs && node test/launch.mjs node dist/index.js",
+    "test:ci": "npm run typecheck && npm run build && node test/regressions.mjs && node test/integration.mjs && node --test test/security.mjs test/model-security.mjs test/statusline-security.mjs test/cancellation.mjs test/lifecycle.mjs && node test/launch.mjs node dist/index.js",
     "test": "for t in guard perm id scope init nopi smoke trace model; do echo \"== $t\"; node test/$t.mjs || exit 1; done",
     "prepublishOnly": "npm run test:ci"
   },
@@ -33,13 +33,13 @@
   },
   "author": "howznguyen <howznguyen@knowns.dev>",
   "license": "MIT",
-  "homepage": "https://github.com/howznguyen/pi-delegate-mcp#readme",
+  "homepage": "https://github.com/mpisat/pi-delegate-mcp#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/howznguyen/pi-delegate-mcp.git"
+    "url": "git+https://github.com/mpisat/pi-delegate-mcp.git"
   },
   "bugs": {
-    "url": "https://github.com/howznguyen/pi-delegate-mcp/issues"
+    "url": "https://github.com/mpisat/pi-delegate-mcp/issues"
   },
   "keywords": [
     "mcp",
@@ -58,9 +58,9 @@
     "codex"
   ],
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "^0.84.3",
-    "@modelcontextprotocol/sdk": "^1.30.0",
-    "zod": "^4.4.3"
+    "@earendil-works/pi-coding-agent": "1.3.0",
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "zod": "4.6.7"
   },
   "types": "dist/index.d.ts",
   "devDependencies": {

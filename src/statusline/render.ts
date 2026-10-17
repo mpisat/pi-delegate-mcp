@@ -14,7 +14,16 @@ const YELLOW = `${ESC}33m`;
 const GREEN = `${ESC}32m`;
 const RED = `${ESC}31m`;
 
-const short = (text: string): string => (text.length <= 14 ? text : `${text.slice(0, 13)}…`);
+function short(text: string): string {
+  // Strip terminal command strings before their introducers and before truncating,
+  // so OSC payloads cannot become visible labels or incomplete escape sequences.
+  const safe = text
+    .replace(/(?:\u001b[\]PX^_]|[\u0090\u0098\u009d-\u009f])[\s\S]*?(?:\u0007|\u001b\\|\u009c|$)/g, "")
+    .replace(/(?:\u001b\[|\u009b)[0-?]*[ -/]*[@-~]?/g, "")
+    .replace(/\u001b[ -/]*[@-~]/g, "")
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, "");
+  return safe.length <= 14 ? safe : `${safe.slice(0, 13)}…`;
+}
 
 export function elapsed(startedAt: string | undefined): string {
   if (!startedAt) return "";

@@ -1,4 +1,4 @@
-import { ALLOW_ALL, ALLOW_EXTRA } from "./config.js";
+import { ALLOW_ALL, ALLOW_EXTRA, ALLOW_EXTENSIONS } from "./config.js";
 
 /** What a delegate gets when a call names no tools. Nothing here can mutate anything. */
 export const READ_ONLY_TOOLS = ["read", "grep", "find", "ls"] as const;
@@ -14,6 +14,8 @@ export const permittedLabel = (): string => (ALLOW_ALL ? "any" : [...PERMITTED].
  */
 export function pickTools(requested?: string[]): string[] {
   if (requested === undefined) return [...READ_ONLY_TOOLS];
+  if (requested.some((name) => name.includes("*") || /^[+-]/.test(name)))
+    throw new Error("TOOL_SELECTION_DENIED: tools must be literal names, not patterns or modifiers");
   if (ALLOW_ALL) return requested;
   const denied = requested.filter((t) => !PERMITTED.has(t));
   if (denied.length)
@@ -23,4 +25,9 @@ export function pickTools(requested?: string[]): string[] {
         `PI_DELEGATE_ALLOW_WRITE=1 to permit everything. Note that granting bash grants writes too.`,
     );
   return requested;
+}
+
+export function checkExtensions(requested?: boolean): void {
+  if (requested && !ALLOW_EXTENSIONS)
+    throw new Error("EXTENSIONS_DENIED: extensions require PI_DELEGATE_ALLOW_EXTENSIONS=1 on the server");
 }

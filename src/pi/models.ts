@@ -1,10 +1,22 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { AGENT_DIR, IGNORE_SCOPE, STRICT_SCOPE } from "../config.js";
 import type { ModelScope } from "../types.js";
 import { getRuntime, type PiModel } from "./runtime.js";
+import { canonicalWorkspace, workspacePath } from "./workspace.js";
 
-function readJson(path: string): Record<string, unknown> | undefined {
+function readJson(path: string, cwd?: string): Record<string, unknown> | undefined {
+  if (cwd) {
+    try {
+      path = workspacePath(path, cwd);
+      if (!statSync(path).isFile())
+        throw new Error("WORKSPACE_DENIED: project settings must be a regular file");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      throw err;
+    }
+  }
   try {
     return JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
   } catch {
@@ -21,9 +33,10 @@ function readJson(path: string): Record<string, unknown> | undefined {
  * An empty or missing enabledModels means no scoping, matching pi's own no-op default.
  */
 export function modelScope(cwd?: string): ModelScope | undefined {
+  cwd = canonicalWorkspace(cwd);
   if (IGNORE_SCOPE) return undefined;
   const global = readJson(join(AGENT_DIR, "settings.json"))?.enabledModels;
-  const local = cwd ? readJson(join(cwd, ".pi", "settings.json"))?.enabledModels : undefined;
+  const local = readJson(join(cwd, ".pi", "settings.json"), cwd)?.enabledModels;
   const enabled = local ?? global;
   if (!Array.isArray(enabled) || enabled.length === 0) return undefined;
 
@@ -103,16 +116,45 @@ export async function preflight(cwd?: string): Promise<Health> {
  * Resolve "provider/modelId" to a model. Splits on the FIRST slash so
  * "openrouter/stealth/ox-alpha" yields provider=openrouter, id=stealth/ox-alpha.
  *
- * Throws on a miss. pi silently falls back to the default model when handed
- * `undefined`, which is how you end up billing a model you never asked for.
+ * Resolve omitted models here too: passing undefined to pi would select a default
+ * after our scope check, allowing that default to bypass enabledModels.
  */
-export async function resolveModel(spec: string | undefined, cwd?: string): Promise<PiModel | undefined> {
-  if (!spec) return undefined;
+export async function resolveModel(spec: string | undefined, cwd?: string): Promise<PiModel> {
+  cwd = canonicalWorkspace(cwd);
   const rt = await getRuntime();
-  const slash = spec.indexOf("/");
   let model: PiModel | undefined;
-  if (slash > 0) model = rt.getModel(spec.slice(0, slash), spec.slice(slash + 1));
-  model ??= rt.getModels().find((m) => m.id === spec);
+  if (!spec) {
+    const global = readJson(join(AGENT_DIR, "settings.json"));
+    const local = readJson(join(cwd, ".pi", "settings.json"), cwd);
+    const provider = local?.defaultProvider ?? global?.defaultProvider;
+    const id = local?.defaultModel ?? global?.defaultModel;
+    if (typeof provider === "string" && provider && typeof id === "string" && id) {
+      spec = `${provider}/${id}`;
+      model = rt.getModel(provider, id);
+    } else {
+      // Let Pi apply its provider defaults and available-model ordering. A supplied
+      // lazy loader and in-memory settings prevent resource discovery or project
+      // execution; no prompt is sent by constructing this selection-only session.
+      const settingsManager = SettingsManager.inMemory();
+      const { session } = await createAgentSession({
+        cwd, agentDir: AGENT_DIR, modelRuntime: rt, settingsManager,
+        sessionManager: SessionManager.inMemory(), tools: [],
+        resourceLoader: new DefaultResourceLoader({
+          cwd, agentDir: AGENT_DIR, settingsManager, noExtensions: true, noContextFiles: true,
+        }),
+      });
+      try {
+        model = session.model;
+      } finally {
+        session.dispose();
+      }
+      if (!model) throw new Error("No authenticated model is available for the pi default.");
+    }
+  } else {
+    const slash = spec.indexOf("/");
+    if (slash > 0) model = rt.getModel(spec.slice(0, slash), spec.slice(slash + 1));
+    model ??= rt.getModels().find((m) => m.id === spec);
+  }
 
   if (!model)
     throw new Error(

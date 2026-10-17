@@ -1,6 +1,7 @@
 import { DEFAULT_MODEL, HISTORY_LIMIT } from "./config.js";
-import { pickTools } from "./permissions.js";
+import { checkExtensions, pickTools } from "./permissions.js";
 import { PiWorker } from "./pi/worker.js";
+import { canonicalWorkspace } from "./pi/workspace.js";
 import { publish } from "./statusline/state.js";
 
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
@@ -58,24 +59,32 @@ export interface LaunchRequest {
   label?: string | undefined;
 }
 
-export async function launch(req: LaunchRequest): Promise<PiWorker> {
+export async function launch(req: LaunchRequest, signal?: AbortSignal): Promise<PiWorker> {
+  signal?.throwIfAborted();
+  checkExtensions(req.extensions);
+  const cwd = canonicalWorkspace(req.cwd);
   const worker = new PiWorker({
     id: claimId(req.id),
     label: req.label,
-    cwd: req.cwd || process.cwd(),
+    cwd,
     model: req.model || DEFAULT_MODEL,
     tools: pickTools(req.tools),
     extensions: req.extensions ?? false,
   });
   worker.onChange = () => publish(all());
   sessions.set(worker.id, worker);
+  const cancel = () => { void worker.abort(); };
+  signal?.addEventListener("abort", cancel, { once: true });
+  if (signal?.aborted) cancel();
   try {
     await worker.start(req.prompt);
   } catch (e) {
     // A session that never started must not occupy its id.
-    sessions.delete(worker.id);
+    if (sessions.get(worker.id) === worker) sessions.delete(worker.id);
     publish(all());
     throw e;
+  } finally {
+    signal?.removeEventListener("abort", cancel);
   }
   evictHistory();
   publish(all());

@@ -1,13 +1,14 @@
 import { randomUUID } from "node:crypto";
 import {
   createAgentSession,
-  DefaultResourceLoader,
   SessionManager,
   type AgentSessionEvent,
   type ExtensionUIContext,
   type CreateAgentSessionResult,
 } from "@earendil-works/pi-coding-agent";
-import { AGENT_DIR } from "../config.js";
+import { createResources } from "./resources.js";
+import { canonicalWorkspace, workspaceTools } from "./workspace.js";
+import { checkExtensions } from "../permissions.js";
 import type { Notice, SessionState, Snapshot, ToolCall, ToolCallSummary } from "../types.js";
 import { resolveModel } from "./models.js";
 import { getRuntime } from "./runtime.js";
@@ -105,28 +106,9 @@ export class PiWorker {
     const model = await resolveModel(this.modelSpec, this.cwd);
     if (this.isAborted()) return this;
 
-    // Third-party pi extensions start timers and sockets that outlive dispose() and then
-    // throw against a stale ctx. A delegate does not need them.
-    const resourceLoader = new DefaultResourceLoader({
-      cwd: this.cwd,
-      agentDir: AGENT_DIR,
-      noExtensions: !this.extensionsEnabled,
-    });
-
-    // The loader is lazy: getExtensions() returns nothing until reload() has run, so
-    // without this `extensions: true` silently loads zero extensions and costs startup
-    // time for nothing. A failure is not fatal, since a delegate with none still works.
-    if (this.extensionsEnabled) {
-      try {
-        await resourceLoader.reload();
-      } catch (e) {
-        this.notices.push({
-          type: "warning",
-          message: `extensions failed to load: ${message(e)}`,
-          at: new Date().toISOString(),
-        });
-      }
-    }
+    checkExtensions(this.extensionsEnabled);
+    canonicalWorkspace(this.cwd);
+    const { resourceLoader, settingsManager } = await createResources(this.cwd, this.extensionsEnabled);
 
     if (this.isAborted()) return this;
     const { session } = await createAgentSession({
@@ -135,6 +117,8 @@ export class PiWorker {
       model,
       sessionManager: SessionManager.inMemory(),
       tools: this.toolNames,
+      customTools: workspaceTools(this.cwd),
+      settingsManager,
       resourceLoader,
     });
     this.session = session;
@@ -142,7 +126,7 @@ export class PiWorker {
       session.dispose();
       return this;
     }
-    this.model = model ? `${model.provider}/${model.id}` : "(pi default)";
+    this.model = `${model.provider}/${model.id}`;
     this.activeTools = session.getActiveToolNames();
 
     this.unsubscribe = session.subscribe((ev) => this.onEvent(ev));

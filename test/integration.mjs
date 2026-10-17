@@ -36,7 +36,7 @@ try {
       contextWindow: 16000, maxTokens: 512, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } })),
   } } }));
   await client.connect(new StdioClientTransport({ command: process.execPath, args: ["dist/index.js"],
-    env: { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("PI_DELEGATE_") && key !== "PI_CODING_AGENT_DIR")), PI_OFFLINE: "1", PI_CODING_AGENT_DIR: agentDir,
+    env: { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("PI_DELEGATE_") && key !== "PI_CODING_AGENT_DIR")), PI_OFFLINE: "1", PI_CODING_AGENT_DIR: agentDir, PI_DELEGATE_ROOT: dir,
       PI_DELEGATE_MODEL: "test/one", PI_DELEGATE_IGNORE_SCOPE: "1" } }));
   const raw = (name, args = {}) => client.callTool({ name, arguments: args });
   const call = async (name, args = {}) => {

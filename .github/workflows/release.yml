@@ -1,10 +1,12 @@
 name: release
 
-# Tag-driven only. `npm version patch && git push --follow-tags` is the whole release ritual.
+# Test ordinary changes as well as releases. Only upstream tags may publish.
 on:
   push:
+    branches: ["main"]
     tags:
       - "v*"
+  pull_request:
 
 jobs:
   test:
@@ -20,10 +22,12 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
-      - run: npm ci
+      - run: npm ci --ignore-scripts
+      - run: sudo apt-get update && sudo apt-get install -y ripgrep fd-find
       - run: npm run test:ci
 
   publish:
+    if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'howznguyen/pi-delegate-mcp'
     needs: test
     runs-on: ubuntu-latest
     permissions:
@@ -41,7 +45,7 @@ jobs:
       # Belt and braces: the bundled npm moves around between runner images.
       - run: npm install -g npm@latest
 
-      - run: npm ci
+      - run: npm ci --ignore-scripts
 
       # A tag that disagrees with package.json would publish the wrong version under the
       # right-looking release. Fail loudly instead.

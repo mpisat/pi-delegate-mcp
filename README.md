@@ -23,6 +23,21 @@ Point Claude Code (or any MCP host) at it and delegate work to any of pi's ~38 p
 (DeepSeek, Grok, GLM, Kimi, Qwen, Codex, OpenRouter, local llama.cpp) with the sub-agent's
 context staying out of your main conversation.
 
+## mpisat fork
+
+This fork pins Pi 1.3.0 and includes regression tests for the security issues found in v0.1.1.
+Default file tools are confined to a server-owned project root, including explicit symlink targets.
+The root defaults to the server startup directory; set `PI_DELEGATE_ROOT` to choose it explicitly.
+A request cannot widen it with `cwd`. Instructions load without executing project configuration.
+Extensions require a separate server-side opt-in. Omitted models are resolved before scope checks,
+and cancelling a blocking `run` aborts its delegate.
+
+The file policy is not an operating-system sandbox. Files inside the allowed tree, including secrets,
+can be sent to the selected model provider. Keep credentials outside that tree. Concurrent changes to
+host filesystem paths are not isolated; use an OS sandbox or container for untrusted mutable workspaces.
+Shell access and administrator-enabled extensions execute with the server account's privileges.
+Claude Code's approval of an MCP call does not supervise the delegate's individual operations.
+
 ## What it's for
 
 Your main harness runs on an expensive model, with a context window you care about. A lot of what
@@ -97,46 +112,47 @@ enforce.)
 Requires Node.js 22.19+ and a working [pi](https://pi.dev) install that has been logged in once
 (`pi`, then `/login`).
 
-### Claude Code
+### Install this fork from source
 
 ```bash
-claude mcp add pi -e PI_DELEGATE_MODEL=openrouter/stealth/ox-alpha -- npx -y pi-delegate-mcp
+git clone https://github.com/mpisat/pi-delegate-mcp.git
+cd pi-delegate-mcp
+npm ci --ignore-scripts
+npm run test:ci
+npm install -g --ignore-scripts .
 ```
 
-### Any MCP host, via `.mcp.json`
+The offline security tests need `rg` and `fd` (or `fdfind`) on PATH. They also discover cached tools
+under the normal Pi agent `bin` directory; `PI_TEST_TOOLS_DIR` overrides that test-only location.
+No provider credentials or paid requests are needed for `test:ci`.
+
+The published upstream npm package does not contain these fork fixes. Installing this fork does
+not connect it to Claude Code. Register the reviewed installed executable as a local stdio MCP server
+when you are ready to connect it. From the project to delegate in:
+
+```bash
+claude mcp add --env PI_DELEGATE_MODEL=opencode-go/deepseek-v4.1-flash --transport stdio pi -- pi-delegate-mcp
+```
+
+For another MCP host, configure a fixed project root and an explicit model:
 
 ```json
 {
   "mcpServers": {
     "pi": {
-      "command": "npx",
-      "args": ["-y", "pi-delegate-mcp"],
-      "env": { "PI_DELEGATE_MODEL": "openrouter/stealth/ox-alpha" },
-      "timeout": 1800000
+      "command": "pi-delegate-mcp",
+      "env": {
+        "PI_DELEGATE_ROOT": "/path/to/project",
+        "PI_DELEGATE_MODEL": "opencode-go/deepseek-v4.1-flash"
+      }
     }
   }
 }
 ```
 
-`npx` resolves the package on every launch. To pin it, install globally and call the binary
-directly:
-
-```bash
-npm install -g pi-delegate-mcp
-```
-
-```json
-{ "mcpServers": { "pi": { "command": "pi-delegate-mcp", "timeout": 1800000 } } }
-```
-
-Keep the server key short, since it prefixes every tool name (`mcp__pi__spawn`).
-
-### From source
-
-```bash
-git clone https://github.com/howznguyen/pi-delegate-mcp && cd pi-delegate-mcp
-npm install && npm run build && npm link
-```
+`commandcode/deepseek/deepseek-v4.1-flash` also works with a Command Code custom provider in Pi's
+`models.json` and its credential in Pi's auth store. The server embeds its pinned Pi SDK; updating
+the standalone `pi` executable does not change that embedded version.
 
 ## First run
 
@@ -263,6 +279,10 @@ Poll the whole batch with one `sessions` call rather than one `status` per deleg
 silent fallback to the default model, because a silent fallback is how you end up billing a model
 you never asked for.
 
+An omitted model is resolved to a concrete model before applying the same scope gate. A configured
+unknown default is rejected. Without a configured default, Pi's own provider preference and model
+ordering select the candidate; an out-of-scope candidate is rejected without switching providers.
+
 Which names resolve is decided by pi's own `enabledModels` scope, which this server enforces
 rather than merely displays:
 
@@ -327,8 +347,10 @@ host pid disappears, so a host that dies without closing the transport leaves no
 
 ## Read-only by default
 
-Tools are locked to `read, grep, find, ls` at session construction. Anything else is refused
-before a session is even created.
+Tools are locked to `read, grep, find, ls` at session construction. Their paths and each request's
+`cwd` must resolve within `PI_DELEGATE_ROOT`. Absolute paths, `..` and symlinks cannot select an
+outside target. These are file access checks, not isolation from concurrent host filesystem changes.
+Anything else is refused before a session is even created.
 
 Omit `tools` to use the defaults. Pass `tools: []` to disable all tools.
 
@@ -338,7 +360,8 @@ To widen that, name the extra tools on the server:
 "env": { "PI_DELEGATE_ALLOW_TOOLS": "bash" }
 ```
 
-or `PI_DELEGATE_ALLOW_WRITE=1` to permit everything.
+or `PI_DELEGATE_ALLOW_WRITE=1` to permit any explicitly named tool. Tool lists are literal names;
+Pi modifier syntax (`+read`, `-write`) and wildcard patterns are rejected, including in privileged mode.
 
 **`bash` is not a middle ground.** pi ships no permission system, so a delegate holding `bash`
 can write files, delete them, and reach the network regardless of whether `write` and `edit` are
@@ -352,10 +375,11 @@ pi's own tools are `read`, `grep`, `find`, `ls`, `bash`, `powershell`, `write`, 
 search and no fetch among them. Those come from pi extensions, which register their own tools, and a
 delegate can use them.
 
-Set `extensions: true` on the call and permit the tool names on the server:
+After reviewing every extension that could load, set `PI_DELEGATE_ALLOW_EXTENSIONS=1` on the server,
+then set `extensions: true` on the call and permit the tool names on the server:
 
 ```json
-"env": { "PI_DELEGATE_ALLOW_TOOLS": "web_search,fetch_content" }
+"env": { "PI_DELEGATE_ALLOW_EXTENSIONS": "1", "PI_DELEGATE_ALLOW_TOOLS": "web_search,fetch_content" }
 ```
 
 ```json
@@ -374,18 +398,19 @@ default is unchanged for calls that do not ask for it.
 
 Which tools exist depends on what the user running the server has installed. `pi-web-access` provides
 `web_search`, `fetch_content`, `source_check` and `get_search_content`. `pi-mcp-adapter` bridges the
-MCP servers in `~/.pi/agent/mcp.json` and exposes them as `mcp`. pi has no MCP client of its own, so
-that extension is the only route to one.
+MCP servers in `~/.pi/agent/mcp.json` and exposes them as `mcp`. Pi 1.3 also has built-in MCP support, but this server does not load it for normal delegates.
 
 **`extensions: true` trusts every installed extension, not just the one you wanted.** They load as a
 set, they run with the full privileges of this server's process, and some open sockets and timers
-that outlive the session. Turn it on per call, for the delegates that need it, rather than leaving it
-on by default. It also costs real startup time, which is why it is off unless asked for.
+that outlive the session. The server-side opt-in explicitly trusts both global and project extension resources; callers
+cannot enable it on their own. Turn it on per call only for delegates that need it. It also costs real startup time, which is why it is off unless asked for.
 
 ## Configuration
 
 | Env var                       | Default          | Meaning                                                                  |
 | ----------------------------- | ---------------- | ------------------------------------------------------------------------ |
+| `PI_DELEGATE_ROOT` | server startup directory | Fixed canonical project root for cwd and default file tools |
+| `PI_DELEGATE_ALLOW_EXTENSIONS` | unset | `1` permits requests to load privileged extensions |
 | `PI_DELEGATE_MODEL`           | pi's own default | Model used when a call omits `model`                                     |
 | `PI_DELEGATE_ALLOW_TOOLS`     | unset            | Comma list of extra tools to permit, e.g. `bash`                         |
 | `PI_DELEGATE_ALLOW_WRITE`     | unset            | `1` permits every tool                                                   |
@@ -411,6 +436,10 @@ through. Three defences, in order of preference:
 2. `run` emits periodic progress notifications, which reset the host's timeout.
 3. Raise the ceiling with `"timeout"` in `.mcp.json` or `MCP_TOOL_TIMEOUT` in the environment.
 
+Cancelling an individual blocking `run` aborts the underlying delegate, including during startup.
+A successful `spawn` or `spawn_batch` intentionally remains active after its immediate response;
+use the explicit `abort` tool to stop it.
+
 `CLAUDE_AUTO_BACKGROUND_TASKS=1` makes Claude Code background long MCP calls after ~2 minutes.
 Note that progress notifications are discarded once a call is backgrounded, so pick (1) or (3),
 not both.
@@ -424,15 +453,19 @@ prefer `auth.json` (run `pi` once and `/login`) over exporting keys in a shell p
 ## Development
 
 ```bash
-npm install
+npm ci --ignore-scripts
 npm run build       # tsc, src/*.ts -> dist/
 npm run typecheck   # tsc --noEmit, strict
-npm run test:ci     # offline: boots the server over stdio and lists its tools
+npm run test:ci     # offline: complete security, cancellation, context and stdio suite
 npm test            # full suite: needs a logged-in pi, makes real model calls
 ```
 
 `test:ci` is what CI runs and what `prepublishOnly` gates on, because it needs no credentials and
-no network. `npm test` drives real delegates against real providers, so it costs money and only
+no network. `npm test` is the legacy author-specific live suite and assumes its historical model configuration.
+Use `node test/live.mjs` for the explicitly opted-in, bounded OpenCode Go and Command Code smoke test
+with your already-configured Pi credentials. It makes real provider requests and consumes usage.
+
+`npm test` drives real delegates against real providers, so it costs money and only
 works where `pi` has been logged in.
 
 | Path                 | What lives there                                     |
@@ -444,8 +477,8 @@ works where `pi` has been logged in.
 | `src/pi/`            | Everything that touches the pi SDK                    |
 | `src/statusline/`    | State file publishing and the status line binary      |
 
-Releases are tag-driven. `npm version patch && git push --follow-tags` runs the build and tests,
-then publishes over OIDC trusted publishing, so no npm token is stored anywhere in the repository.
+CI runs the offline suite for main-branch pushes and pull requests. This fork does not publish
+to npm; the upstream repository's tag-only OIDC publishing job remains restricted to upstream.
 
 Issues and pull requests are welcome. If you are reporting a delegate that misbehaved, the
 `toolCalls` trace from `status` with `verbose: true` is the useful thing to attach.
